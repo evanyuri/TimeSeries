@@ -9,52 +9,64 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import tensorflow as tf
+from pandas.tseries.offsets import DateOffset
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from statsmodels.tools.eval_measures import rmse
+from sklearn.preprocessing import MinMaxScaler
+from keras.preprocessing.sequence import TimeseriesGenerator
+from keras.models import Sequential
+from keras.layers import Dense
+from keras.layers import LSTM
+from keras.layers import Dropout
+import warnings
 
 mpl.rcParams['figure.figsize'] = (8, 6)
 mpl.rcParams['axes.grid'] = False
 
-df = pd.read_csv('raw.csv')
+OUT_STEPS = 0
+
+
+
+df = pd.read_csv('weather.csv')
 df = df.dropna()
 # print(df)
-df = df[5::6]
-# df = df.iloc[::-1]
-# date_time = pd.to_datetime(df.pop('DATE'))
-# df.index = date_time
-
-
-label = 'CSUSHPISA'
-plot_cols =df.columns.to_list()
-
-# _ = df[label].plot(subplots=True)
-# df = df.rolling(5).mean()
+label = 'MaxTemp'
+plot_cols = ["MinTemp", "MaxTemp", "Humidity3pm",  "Pressure9am",]
+df = df[plot_cols]
+df = df[:20]
+# d = pd.DataFrame(0, index=np.arange(OUT_STEPS), columns=df.columns)
+# df = pd.concat([df,d])
+print(df)
 
 #Split Data
+n = len(df)
+train = 1
+train_split = int(n*train)
 column_indices = {name: i for i, name in enumerate(df.columns)}
 
-n = len(df)
-print('len df:',n)
-train_df = df[0:int(n*0.7)]
-val_df = df[int(n*0.7):int(n*0.9)]
-test_df = df[int(n*0.9):]
+input_width = train_split-OUT_STEPS
+
+# print('len df:',n)
+train_df = df[0:train_split]
+
+test_df = df[-OUT_STEPS:]
 
 num_features = df.shape[1]
 
 #Normalize the data
-train_mean = train_df.mean()
-train_std = train_df.std()
+# train_mean = train_df.mean()
+# train_std = train_df.std()
 
-train_df = (train_df - train_mean) / train_std
-val_df = (val_df - train_mean) / train_std
-test_df = (test_df - train_mean) / train_std
-
+# train_df = (train_df - train_mean) / train_std
 
 class WindowGenerator():
   def __init__(self, input_width, label_width, shift,
-               train_df=train_df, val_df=val_df, test_df=test_df,
+               train_df=train_df, test_df=test_df,
                label_columns=None):
     # Store the raw data.
     self.train_df = train_df
-    self.val_df = val_df
     self.test_df = test_df
 
     # Work out the label column indices.
@@ -86,9 +98,6 @@ class WindowGenerator():
         f'Label indices: {self.label_indices}',
         f'Label column name(s): {self.label_columns}'])
 
-# w = WindowGenerator(input_width=24, label_width=1, shift=24,
-#                 label_columns=[label])
-# print(w)
 
 def split_window(self, features):
   inputs = features[:, self.input_slice, :]
@@ -98,8 +107,6 @@ def split_window(self, features):
         [labels[:, :, self.column_indices[name]] for name in self.label_columns],
         axis=-1)
 
-  # Slicing doesn't preserve static shape information, so set the shapes
-  # manually. This way the `tf.data.Datasets` are easier to inspect.
   inputs.set_shape([None, self.input_width, None])
   labels.set_shape([None, self.label_width, None])
 
@@ -137,14 +144,7 @@ def plot(self, model=None, plot_col=label, max_subplots=1):
 
     if n == 0:
       plt.legend()
-
-  plt.xlabel('Time [h]')
-
 WindowGenerator.plot = plot
-
-
-
-
 
 
 def make_dataset(self, data):
@@ -158,7 +158,8 @@ def make_dataset(self, data):
       batch_size=32,)
 
   ds = ds.map(self.split_window)
-
+  for element in ds.as_numpy_iterator(): 
+    print(element) 
   return ds
 
 WindowGenerator.make_dataset = make_dataset
@@ -166,10 +167,6 @@ WindowGenerator.make_dataset = make_dataset
 @property
 def train(self):
   return self.make_dataset(self.train_df)
-
-@property
-def val(self):
-  return self.make_dataset(self.val_df)
 
 @property
 def test(self):
@@ -187,65 +184,43 @@ def example(self):
   return result
 
 WindowGenerator.train = train
-WindowGenerator.val = val
 WindowGenerator.test = test
 WindowGenerator.example = example
 
 
-
-##Single prediction 
-single_step_window = WindowGenerator(
-    input_width=1, label_width=1, shift=1,
-    label_columns=[label])
-
-
-MAX_EPOCHS = 50
+MAX_EPOCHS = 20
 
 def compile_and_fit(model, window, patience=2):
-  early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss',
-                                                    patience=patience,
-                                                    mode='min')
-
+  for element in window.train.as_numpy_iterator(): 
+    print(element) 
   model.compile(loss=tf.keras.losses.MeanSquaredError(),
                 optimizer=tf.keras.optimizers.Adam(),
                 metrics=[tf.keras.metrics.MeanAbsoluteError()])
-
-  history = model.fit(window.train, epochs=MAX_EPOCHS,
-                      validation_data=window.val,
-                      callbacks=[early_stopping])
+  history = model.fit(window.train, epochs=MAX_EPOCHS,)
   return history
 
 
 
 
-OUT_STEPS = 20
-multi_window = WindowGenerator(input_width=200,
+multi_window = WindowGenerator(input_width=input_width,
                                label_width=OUT_STEPS,
                                shift=OUT_STEPS)
-
+# print('multi_window: ',multi_window)
+                               
 multi_window.plot()
-plt.show()
-
 multi_val_performance = {}
 multi_performance = {}
 
 multi_lstm_model = tf.keras.Sequential([
-    # Shape [batch, time, features] => [batch, lstm_units].
-    # Adding more `lstm_units` just overfits more quickly.
     tf.keras.layers.LSTM(32, return_sequences=False),
-    # Shape => [batch, out_steps*features].
     tf.keras.layers.Dense(OUT_STEPS*num_features,
                           kernel_initializer=tf.initializers.zeros()),
-    # Shape => [batch, out_steps, features].
     tf.keras.layers.Reshape([OUT_STEPS, num_features])
 ])
 
 history = compile_and_fit(multi_lstm_model, multi_window)
 
 IPython.display.clear_output()
-
-# multi_val_performance['LSTM'] = multi_lstm_model.evaluate(multi_window.val)
-# multi_performance['LSTM'] = multi_lstm_model.evaluate(multi_window.test, verbose=0)
-# print(multi_performance['LSTM'])
 multi_window.plot(multi_lstm_model)
 plt.show()
+

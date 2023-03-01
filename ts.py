@@ -1,6 +1,5 @@
 import os
 import datetime
-
 import IPython
 import IPython.display
 import matplotlib as mpl
@@ -10,7 +9,17 @@ import pandas as pd
 import seaborn as sns
 import tensorflow as tf
 from pandas.tseries.offsets import DateOffset
-
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from statsmodels.tools.eval_measures import rmse
+from sklearn.preprocessing import MinMaxScaler
+from keras.preprocessing.sequence import TimeseriesGenerator
+from keras.models import Sequential
+from keras.layers import Dense
+from keras.layers import LSTM
+from keras.layers import Dropout
+import warnings
 
 mpl.rcParams['figure.figsize'] = (8, 6)
 mpl.rcParams['axes.grid'] = False
@@ -19,7 +28,7 @@ df = pd.read_csv('weather.csv')
 df = df.dropna()
 # print(df)
 label = 'MaxTemp'
-plot_cols = ["MinTemp", "MaxTemp",  "Rainfall",  "Evaporation",  "Sunshine", "WindSpeed3pm",  "Humidity9am",  "Humidity3pm",  "Pressure9am",  "Pressure3pm",  "Cloud9am",]
+plot_cols = ["MinTemp", "MaxTemp", "Humidity3pm",  "Pressure9am", ]
 df = df[plot_cols]
 # _ = df[label].plot(subplots=True)
 # df = df.rolling(5).mean()
@@ -39,10 +48,10 @@ input_width = train_split-OUT_STEPS
 
 
 
-print('len df:',n)
+# print('len df:',n)
 train_df = df[0:train_split]
-# val_df = df[train_split:val_split]
-# test_df = df[test_split:]
+val_df = df[train_split:val_split]
+test_df = df[test_split:]
 
 num_features = df.shape[1]
 
@@ -51,8 +60,8 @@ train_mean = train_df.mean()
 train_std = train_df.std()
 
 train_df = (train_df - train_mean) / train_std
-# val_df = (val_df - train_mean) / train_std
-# test_df = (test_df - train_mean) / train_std
+val_df = (val_df - train_mean) / train_std
+test_df = (test_df - train_mean) / train_std
 
 
 class WindowGenerator():
@@ -147,10 +156,6 @@ def plot(self, model=None, plot_col=label, max_subplots=1):
 WindowGenerator.plot = plot
 
 
-
-
-
-
 def make_dataset(self, data):
   data = np.array(data, dtype=np.float32)
   ds = tf.keras.utils.timeseries_dataset_from_array(
@@ -162,7 +167,8 @@ def make_dataset(self, data):
       batch_size=32,)
 
   ds = ds.map(self.split_window)
-
+  for element in ds.as_numpy_iterator(): 
+    print(element) 
   return ds
 
 WindowGenerator.make_dataset = make_dataset
@@ -196,7 +202,7 @@ WindowGenerator.test = test
 WindowGenerator.example = example
 
 
-MAX_EPOCHS = 100
+MAX_EPOCHS = 50
 
 def compile_and_fit(model, window, patience=2):
   early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss',
@@ -243,7 +249,7 @@ IPython.display.clear_output()
 # multi_performance['LSTM'] = multi_lstm_model.evaluate(multi_window.test, verbose=0)
 # print(multi_performance['LSTM'])
 multi_window.plot(multi_lstm_model)
-plt.show()
+# plt.show()
 
 
 # add_dates = [df.index[-1] + DateOffset(months=x) for x in range(0,13) ]
@@ -253,6 +259,6 @@ plt.show()
 
 # df_proj = pd.concat([df,df_predict], axis=1)
 
-print('df: ',n)
-print('train_len: ',train_split)
-print('val_len: ',val_split)
+# print('df: ',n)
+# print('train_len: ',train_split)
+# print('val_len: ',val_split)
